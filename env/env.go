@@ -53,7 +53,6 @@ func init() {
 	Default.Vars = Default.Environ()
 }
 
-
 // Parse parses the command-line flags from os.Args[1:]. Must be called
 // after all flags are defined and before flags are accessed by the program.
 func (e *Env) Parse() {
@@ -114,4 +113,26 @@ func (e *Env) LookupEnvOr(key, fallback string) (string, bool) {
 		return v, ok
 	}
 	return fallback, false
+}
+
+func (e *Env) Unsetenv(key string) {
+	delete(e.Vars, key)
+}
+
+// Unsetenv unsets an environment variable given a key by re-setting all other
+// keys again and filtering the given key. If the re-setting fails, Unsetenv
+// returns and error, leaving envs partially set.
+func Unsetenv(key string) error {
+	envs := os.Environ()
+	os.Clearenv()
+	for _, e := range envs {
+		kv := strings.SplitN(e, "=", 2)
+		if kv[0] == key {
+			continue
+		}
+		if err := os.Setenv(kv[0], kv[1]); err != nil {
+			return err
+		}
+	}
+	return nil
 }
