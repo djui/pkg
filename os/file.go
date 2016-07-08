@@ -5,6 +5,13 @@ import (
 	"os"
 )
 
+const (
+	// PrivateFileMode grants owner to read/write a file.
+	PrivateFileMode = 0600
+	// PrivateDirMode grants owner to make/remove files inside the directory.
+	PrivateDirMode = 0700
+)
+
 // Exists checks if a given filepath exists. Note that it's usually better to
 // just use os.Open/1 when interacting with the file to avoid race-conditions.
 func Exists(path string) bool {
