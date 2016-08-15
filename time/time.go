@@ -1,10 +1,76 @@
 package time
 
 import (
-	"encoding/json"
 	"encoding/xml"
+	"strings"
 	"time"
 )
+
+var formatReplacer *strings.Replacer
+var formatPatterns = map[string]string{
+	// Day
+	"%d": "02",     // Two-digit day of the month (with leading zeros)
+	"%e": "2",      // Day of the month, with a single digits
+	"%a": "Mon",    // An abbreviated textual representation of the day
+	"%A": "Monday", // A full textual representation of the day
+	// Month
+	"%b": "Jan",     // Abbreviated month name
+	"%h": "Jan",     // Abbreviated month name (an alias of %b)
+	"%B": "January", // Full month name
+	"%m": "01",      // Two digit representation of the month
+	// Year
+	"%y": "06",   // Two digit representation of the year
+	"%Y": "2006", // Four digit representation for the year
+	// Time
+	"%H": "15",          // Two digit representation of the hour in 24-hour format
+	"%k": "15",          // Two digit representation of the hour in 24-hour format, with a space preceding single digits
+	"%I": "03",          // Two digit representation of the hour in 12-hour format
+	"%l": "3",           // Hour in 12-hour format, with a space preceding single digits
+	"%M": "04",          // Two digit representation of the minute
+	"%P": "pm",          // UPPER-CASE 'AM' or 'PM' based on the given time
+	"%p": "PM",          // lower-case 'am' or 'pm' based on the given time
+	"%r": "03:04:05 PM", // Same as "%I:%M:%S %p"
+	"%R": "15:04",       // Same as "%H:%M"
+	"%S": "05",          // Two digit representation of the second
+	"%T": "15:04:05",    // Same as "%H:%M:%S"
+	"%z": "-0700",       // The time zone offset. Not implemented as described on Windows. See below for more information.
+	"%Z": "MST",         // The time zone abbreviation.
+	// Time and Date Stamps
+	"%D": "01/02/2006", // Same as "%m/%d/%y"
+	"%F": "2006-01-02", // Same as "%Y-%m-%d"
+	// Miscellaneous
+	"%n": "\n", // A newline character ("\n")
+	"%t": "\t", // A Tab character ("\t")
+	"%%": "%",  // A literal percentage character ("%")
+}
+
+func init() {
+	var fp []string
+	for k, v := range formatPatterns {
+		fp = append(fp, k, v)
+	}
+	formatReplacer = strings.NewReplacer(fp...)
+}
+
+// ParseUnix parses a formatted string and returns the time value it represents.
+// The layout defines the format declared in
+// http://pubs.opengroup.org/onlinepubs/007908799/xsh/strftime.html . The
+// implementation differs from the original as no local information is taken
+// into account.
+func ParseUnix(layout, value string) (time.Time, error) {
+	layout = formatReplacer.Replace(layout)
+	return time.ParseInLocation(layout, value, time.Local)
+}
+
+// FormatUnix returns a textual representation of the time value formatted
+// according to layout, which defines the format declared in
+// http://pubs.opengroup.org/onlinepubs/007908799/xsh/strftime.html . The
+// implementation differs from the original as no local information is taken
+// into account.
+func FormatUnix(t time.Time, layout string) string {
+	layout = formatReplacer.Replace(layout)
+	return t.Format(layout)
+}
 
 // RFC3339Time allows RFC 3339 compliant un/marshaling.
 type RFC3339Time struct {
