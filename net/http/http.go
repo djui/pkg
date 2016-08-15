@@ -9,16 +9,16 @@ import (
 	"time"
 )
 
-// HTTPError holds an error and HTTP status.
-type HTTPError struct {
+// Error holds an error and HTTP status.
+type Error struct {
 	error
 	Status int
 }
 
-// ToHTTPError takes an error and returns a best guess of what the corresponding
+// ToError takes an error and returns a best guess of what the corresponding
 // HTTP error should be.
-func ToHTTPError(err error) (msg string, httpStatus int) {
-	if httpErr, ok := err.(*HTTPError); ok {
+func ToError(err error) (msg string, httpStatus int) {
+	if httpErr, ok := err.(*Error); ok {
 		return httpErr.Error(), httpErr.Status
 	}
 	if os.IsNotExist(err) {
