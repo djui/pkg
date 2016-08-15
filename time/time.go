@@ -43,7 +43,7 @@ func (c *RFC3339Time) MarshalXMLAttr(name xml.Name) (xml.Attr, error) {
 // UnmarshalXML satisfies the xml.Unmarshaler interface.
 func (c *RFC3339Time) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
 	var v string
-	if err := d.DecodeElement(&v, &start) {
+	if err := d.DecodeElement(&v, &start); err != nil {
 		return err
 	}
 	parse, err := time.Parse(time.RFC3339, v)
