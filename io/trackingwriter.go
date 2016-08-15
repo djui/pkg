@@ -13,6 +13,8 @@ type TrackingWriter struct {
 	last byte
 }
 
+// NewTrackingWriter instatiates a new writer which tracks the last byte written
+// on every write.
 func NewTrackingWriter(w io.Writer) *TrackingWriter {
 	return &TrackingWriter{
 		w:    bufio.NewWriter(w),
@@ -28,10 +30,12 @@ func (t *TrackingWriter) Write(p []byte) (n int, err error) {
 	return
 }
 
+// Flush satisfies the Flusher interface.
 func (t *TrackingWriter) Flush() {
 	t.w.Flush()
 }
 
+// NeedNL indicates if the last byte written is not a newline.
 func (t *TrackingWriter) NeedNL() bool {
 	return t.last != '\n'
 }

@@ -79,6 +79,7 @@ func (f Frame) Format(s fmt.State, verb rune) {
 // StackTrace is stack of Frames from innermost (newest) to outermost (oldest).
 type StackTrace []Frame
 
+// Format formats a stack of Frames including their extended formatting rules.
 func (st StackTrace) Format(s fmt.State, verb rune) {
 	switch verb {
 	case 'v':
