@@ -94,3 +94,13 @@ func (c *RFC3339Time) UnmarshalText(text []byte) error {
 	c.Time = parse
 	return nil
 }
+
+// GobEncode implements the gob.GobEncoder interface.
+func (t RFC3339Time) GobEncode() ([]byte, error) {
+	return t.MarshalBinary()
+}
+
+// GobDecode implements the gob.GobDecoder interface.
+func (t *RFC3339Time) GobDecode(data []byte) error {
+	return t.UnmarshalBinary(data)
+}
