@@ -6,42 +6,46 @@ import (
 	"time"
 )
 
-// RFC3339Time allows RFC 3339 compliant XML un/marshaling.
+// RFC3339Time allows RFC 3339 compliant un/marshaling.
 type RFC3339Time struct {
 	time.Time
 }
 
-// MarshalJSON satisfies the json.Marshaler interface.
-func (c *RFC3339Time) MarshalJSON() ([]byte, error) {
-	return json.Marshal(c.Time.Format(time.RFC3339))
+// MarshalJSON implements the json.Marshaler interface.
+func (t RFC3339Time) MarshalJSON() ([]byte, error) {
+	b := make([]byte, 0, len(time.RFC3339)+2)
+	b = append(b, '"')
+	b = t.AppendFormat(b, time.RFC3339)
+	b = append(b, '"')
+	return b, nil
 }
 
-// UnmarshalJSON satisfies the json.Unmarshaler interface.
-func (c *RFC3339Time) UnmarshalJSON(json []byte) error {
-	parse, err := time.Parse(time.RFC3339, string(json))
+// UnmarshalJSON implements the json.Unmarshaler interface.
+func (t *RFC3339Time) UnmarshalJSON(json []byte) error {
+	parse, err := time.Parse(`"`+time.RFC3339+`"`, string(json))
 	if err != nil {
 		return err
 	}
-	c.Time = parse
+	t.Time = parse
 	return nil
 }
 
-// MarshalXML satisfies the xml.Marshaler interface.
-func (c *RFC3339Time) MarshalXML(e *xml.Encoder, start xml.StartElement) error {
-	return e.EncodeElement(c.Time.Format(time.RFC3339), start)
+// MarshalXML implements the xml.Marshaler interface.
+func (t RFC3339Time) MarshalXML(e *xml.Encoder, start xml.StartElement) error {
+	return e.EncodeElement(t.Time.Format(time.RFC3339), start)
 }
 
-// MarshalXMLAttr satsfies the xml.MarshalerAttr interface.
-func (c *RFC3339Time) MarshalXMLAttr(name xml.Name) (xml.Attr, error) {
+// MarshalXMLAttr implements the xml.MarshalerAttr interface.
+func (t RFC3339Time) MarshalXMLAttr(name xml.Name) (xml.Attr, error) {
 	attr := xml.Attr{
 		Name:  name,
-		Value: c.Time.Format(time.RFC3339),
+		Value: t.Time.Format(time.RFC3339),
 	}
 	return attr, nil
 }
 
-// UnmarshalXML satisfies the xml.Unmarshaler interface.
-func (c *RFC3339Time) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
+// UnmarshalXML implements the xml.Unmarshaler interface.
+func (t *RFC3339Time) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
 	var v string
 	if err := d.DecodeElement(&v, &start); err != nil {
 		return err
@@ -50,48 +54,48 @@ func (c *RFC3339Time) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error
 	if err != nil {
 		return err
 	}
-	c.Time = parse
+	t.Time = parse
 	return nil
 }
 
-// UnmarshalXMLAttr satisfies the xml.UnmarshalerAttr interface.
-func (c *RFC3339Time) UnmarshalXMLAttr(attr xml.Attr) error {
+// UnmarshalXMLAttr implements the xml.UnmarshalerAttr interface.
+func (t *RFC3339Time) UnmarshalXMLAttr(attr xml.Attr) error {
 	parse, err := time.Parse(time.RFC3339, attr.Value)
 	if err != nil {
 		return err
 	}
-	c.Time = parse
+	t.Time = parse
 	return nil
 }
 
-// MarshalBinary satisfies the encoding.BinaryMarshaler interface.
-func (c *RFC3339Time) MarshalBinary() ([]byte, error) {
-	return []byte(c.Time.Format(time.RFC3339)), nil
+// MarshalBinary implements the encoding.BinaryMarshaler interface.
+func (t RFC3339Time) MarshalBinary() ([]byte, error) {
+	return []byte(t.Time.Format(time.RFC3339)), nil
 }
 
-// UnmarshalBinary satisfies the encoding.BinaryUnmarshaler interface.
-func (c *RFC3339Time) UnmarshalBinary(data []byte) error {
+// UnmarshalBinary implements the encoding.BinaryUnmarshaler interface.
+func (t *RFC3339Time) UnmarshalBinary(data []byte) error {
 	parse, err := time.Parse(time.RFC3339, string(data))
 	if err != nil {
 		return err
 	}
-	c.Time = parse
+	t.Time = parse
 	return nil
 
 }
 
-// MarshalText satisfies the encoding.TextMarshaler interface.
-func (c *RFC3339Time) MarshalText() ([]byte, error) {
-	return []byte(c.Time.Format(time.RFC3339)), nil
+// MarshalText implements the encoding.TextMarshaler interface.
+func (t RFC3339Time) MarshalText() ([]byte, error) {
+	return []byte(t.Time.Format(time.RFC3339)), nil
 }
 
-// UnmarshalText satisfies the encoding.TextUnmarshaler interface.
-func (c *RFC3339Time) UnmarshalText(text []byte) error {
+// UnmarshalText implements the encoding.TextUnmarshaler interface.
+func (t *RFC3339Time) UnmarshalText(text []byte) error {
 	parse, err := time.Parse(time.RFC3339, string(text))
 	if err != nil {
 		return err
 	}
-	c.Time = parse
+	t.Time = parse
 	return nil
 }
 
