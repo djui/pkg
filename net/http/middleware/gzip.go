@@ -1,93 +1,204 @@
 package middleware
 
 import (
-	"bufio"
 	"compress/gzip"
 	"fmt"
-	"io"
-	"net"
 	"net/http"
+	"strconv"
 	"strings"
+	"sync"
 )
 
-// GZip provides a HTTP middleware to GZip compress the response stream.
-func GZip(next http.Handler) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		acceptEncoding := r.Header.Get("Accept-Encoding")
-		compress := strings.Contains(acceptEncoding, "gzip")
-		if _, upgrade := r.Header["Upgrade"]; upgrade {
-			// Avoid compressing websockets due to handling of
-			// closing and flushing of connections.
-			compress = false
-		}
-		if !compress {
-			next.ServeHTTP(w, r)
-			return
-		}
+const (
+	vary            = "Vary"
+	acceptEncoding  = "Accept-Encoding"
+	contentEncoding = "Content-Encoding"
+)
 
-		w.Header().Set("Content-Encoding", "gzip")
-		w.Header().Set("Vary", "Accept-Encoding")
+type codings map[string]float64
 
-		// Remove Accept-Encoding from the request, so that further
-		// handlers don't attempt to apply their own encodings.
-		r.Header.Del("Accept-Encoding")
+// defaultQValue defines the default qvalue to assign to an encoding if no
+// explicit qvalue is set. This is actually kind of ambiguous in RFC 2616, so
+// hopefully it's correct. The examples seem to indicate that it is.
+const defaultQValue = 1.0
 
-		gz := gzip.NewWriter(w)
-		gzw := &gzipResponseWriter{Writer: gz, ResponseWriter: w, gz: gz}
+// gzipWriterPools stores a sync.Pool for each compression level for re-uze of gzip.Writers.
+// Use poolIndex to covert a compression level to an index into gzipWriterPools.
+var gzipWriterPools [gzip.BestCompression - gzip.BestSpeed + 2]*sync.Pool
 
-		defer func() {
-			// Only close gz if anything was written.
-			if gzw.bytesWritten != 0 {
-				gz.Close()
-			}
-		}()
+func init() {
+	for i := gzip.BestSpeed; i <= gzip.BestCompression; i++ {
+		addLevelPool(i)
+	}
+	addLevelPool(gzip.DefaultCompression)
+}
 
-		next.ServeHTTP(gzw, r)
+// poolIndex maps a compression level to its index into gzipWriterPools. It assumes that
+// level is a valid gzip compression level.
+func poolIndex(level int) int {
+	// gzip.DefaultCompression == -1, so we need to treat it special.
+	if level == gzip.DefaultCompression {
+		return gzip.BestCompression - gzip.BestSpeed + 1
+	}
+	return level - gzip.BestSpeed
+}
+
+func addLevelPool(level int) {
+	gzipWriterPools[poolIndex(level)] = &sync.Pool{
+		New: func() interface{} {
+			// NewWriterLevel only returns error on a bad level, we are guaranteeing
+			// that this will be a valid level so it is okay to ignore the returned
+			// error.
+			w, _ := gzip.NewWriterLevel(nil, level)
+			return w
+		},
 	}
 }
 
-type gzipResponseWriter struct {
-	io.Writer
+// GzipResponseWriter provides an http.ResponseWriter interface, which gzips
+// bytes before writing them to the underlying response. This doesn't set the
+// Content-Encoding header, nor close the writers, so don't forget to do that.
+type GzipResponseWriter struct {
+	gw *gzip.Writer
 	http.ResponseWriter
-
-	gz            *gzip.Writer
-	headerWritten bool
-	bytesWritten  int
 }
 
-// WriteHeader removes the Content-Length if set.
-func (w *gzipResponseWriter) WriteHeader(code int) {
-	w.Header().Del("Content-Length")
-	w.ResponseWriter.WriteHeader(code)
-	w.headerWritten = true
-}
-
-func (w *gzipResponseWriter) Write(b []byte) (int, error) {
-	if len(w.Header().Get("Content-Type")) == 0 {
+// Write appends data to the gzip writer.
+func (w GzipResponseWriter) Write(b []byte) (int, error) {
+	if _, ok := w.Header()["Content-Type"]; !ok {
+		// If content type is not set, infer it from the uncompressed body.
 		w.Header().Set("Content-Type", http.DetectContentType(b))
 	}
-
-	if !w.headerWritten {
-		w.WriteHeader(http.StatusOK)
-	}
-
-	n, err := w.Writer.Write(b)
-	w.bytesWritten += n
-	return n, err
+	return w.gw.Write(b)
 }
 
-func (w *gzipResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
-	h, ok := w.ResponseWriter.(http.Hijacker)
-	if !ok {
-		err := fmt.Errorf("%T does not implement http.Hijacker", w.ResponseWriter)
-		return nil, nil, err
+// Flush flushes the underlying *gzip.Writer and then the underlying
+// http.ResponseWriter if it is an http.Flusher. This makes GzipResponseWriter
+// an http.Flusher.
+func (w GzipResponseWriter) Flush() {
+	w.gw.Flush()
+	if fw, ok := w.ResponseWriter.(http.Flusher); ok {
+		fw.Flush()
 	}
-	return h.Hijack()
 }
 
-func (w *gzipResponseWriter) Flush() {
-	if f, ok := w.ResponseWriter.(http.Flusher); ok {
-		_ = w.gz.Flush()
-		f.Flush()
+// MustNewGzipLevelHandler behaves just like NewGzipLevelHandler except that in an error case
+// it panics rather than returning an error.
+func MustNewGzipLevelHandler(level int) func(http.Handler) http.Handler {
+	wrap, err := NewGzipLevelHandler(level)
+	if err != nil {
+		panic(err)
 	}
+	return wrap
+}
+
+// NewGzipLevelHandler returns a wrapper function (often known as middleware)
+// which can be used to wrap an HTTP handler to transparently gzip the response
+// body if the client supports it (via the Accept-Encoding header). Responses will
+// be encoded at the given gzip compression level. An error will be returned only
+// if an invalid gzip compression level is given, so if one can ensure the level
+// is valid, the returned error can be safely ignored.
+func NewGzipLevelHandler(level int) (func(http.Handler) http.Handler, error) {
+	if level != gzip.DefaultCompression && (level < gzip.BestSpeed || level > gzip.BestCompression) {
+		return nil, fmt.Errorf("invalid compression level requested: %d", level)
+	}
+	return func(h http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Add(vary, acceptEncoding)
+
+			if _, ok := r.Header["Upgrade"]; ok {
+				// Avoid compressing websockets due to handling of closing and
+				// flushing of connections.
+				h.ServeHTTP(w, r)
+			} else if acceptsGzip(r) {
+				// Bytes written during ServeHTTP are redirected to this gzip writer
+				// before being written to the underlying response.
+				gzw := gzipWriterPools[poolIndex(level)].Get().(*gzip.Writer)
+				defer gzipWriterPools[poolIndex(level)].Put(gzw)
+				gzw.Reset(w)
+				defer gzw.Close()
+
+				w.Header().Set(contentEncoding, "gzip")
+				h.ServeHTTP(GzipResponseWriter{gzw, w}, r)
+			} else {
+				h.ServeHTTP(w, r)
+			}
+		})
+	}, nil
+}
+
+// GzipHandler wraps an HTTP handler, to transparently gzip the response body if
+// the client supports it (via the Accept-Encoding header). This will compress at
+// the default compression level.
+func GzipHandler(h http.Handler) http.Handler {
+	wrapper, _ := NewGzipLevelHandler(gzip.DefaultCompression)
+	return wrapper(h)
+}
+
+// acceptsGzip returns true if the given HTTP request indicates that it will
+// accept a gzippped response.
+func acceptsGzip(r *http.Request) bool {
+	acceptedEncodings, _ := parseEncodings(r.Header.Get(acceptEncoding))
+	return acceptedEncodings["gzip"] > 0.0
+}
+
+// parseEncodings attempts to parse a list of codings, per RFC 2616, as might
+// appear in an Accept-Encoding header. It returns a map of content-codings to
+// quality values, and an error containing the errors encounted. It's probably
+// safe to ignore those, because silently ignoring errors is how the internet
+// works.
+//
+// See: http://tools.ietf.org/html/rfc2616#section-14.3
+func parseEncodings(s string) (codings, error) {
+	c := make(codings)
+	e := make([]string, 0)
+
+	for _, ss := range strings.Split(s, ",") {
+		coding, qvalue, err := parseCoding(ss)
+
+		if err != nil {
+			e = append(e, err.Error())
+
+		} else {
+			c[coding] = qvalue
+		}
+	}
+
+	// TODO (adammck): Use a proper multi-error struct, so the individual errors
+	//                 can be extracted if anyone cares.
+	if len(e) > 0 {
+		return c, fmt.Errorf("errors while parsing encodings: %s", strings.Join(e, ", "))
+	}
+
+	return c, nil
+}
+
+// parseCoding parses a single conding (content-coding with an optional qvalue),
+// as might appear in an Accept-Encoding header. It attempts to forgive minor
+// formatting errors.
+func parseCoding(s string) (coding string, qvalue float64, err error) {
+	for n, part := range strings.Split(s, ";") {
+		part = strings.TrimSpace(part)
+		qvalue = defaultQValue
+
+		if n == 0 {
+			coding = strings.ToLower(part)
+
+		} else if strings.HasPrefix(part, "q=") {
+			qvalue, err = strconv.ParseFloat(strings.TrimPrefix(part, "q="), 64)
+
+			if qvalue < 0.0 {
+				qvalue = 0.0
+
+			} else if qvalue > 1.0 {
+				qvalue = 1.0
+			}
+		}
+	}
+
+	if coding == "" {
+		err = fmt.Errorf("empty content-coding")
+	}
+
+	return
 }
